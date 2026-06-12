@@ -14,6 +14,26 @@ doubles** (with an internal integer fast path), whereas **Lua 5.3+ introduced a
 first-class 64-bit integer subtype**. That single design difference is the root
 of most of the porting difficulty.
 
+## Update: utf8 library (Tier-1, implemented)
+
+The Lua 5.3/5.4 `utf8` library is now provided by LuaJIT (both the standard and
+`luajit-int` builds). It is a self-contained C module (`lib_utf8.c`, ported from
+the reference `lutf8lib.c`) with no VM/JIT/parser changes:
+
+- `utf8.char`, `utf8.codepoint`, `utf8.len`, `utf8.offset`, `utf8.codes`,
+  `utf8.charpattern` — all match Lua 5.4.8 (1/2/3/4-byte sequences, invalid-input
+  handling, up to `U+10FFFF`).
+- Verified by `tests/cases/11_utf8.lua` (runs on both engines; suite is 11/11).
+- Only divergence: an out-of-range error names the function `'?'` instead of
+  `'utf8.char'` (LuaJIT C-function name resolution); the message text matches.
+
+> Note: `//` and the native bitwise operators `& | ~ << >>` were investigated
+> and are **not** compile-time-only in LuaJIT after all — it has no idiv/bitwise
+> metamethods or bytecodes (arithmetic ops stop at `pow`; bitwise lives only in
+> the `bit` library). Adding them faithfully needs new VM bytecodes + assembly +
+> JIT work (Milestone-2 class), so they remain on the roadmap rather than being
+> shipped as a fragile parser hack.
+
 ## Update: integer/float subtype (Milestone 1 implemented)
 
 A dual-number LuaJIT variant (`build/bin/luajit-int`, built with
@@ -94,14 +114,13 @@ produces identical output, including observing the compile error via `load()`.
 ## Roadmap for the rest (in suggested order)
 
 **Tier 1 — compile-time only (days each, low risk).**
-- `//` floor-division operator: add the token in `lj_lex.c`, the binop in
-  `lj_parse.c`, and lower it to existing float floor semantics. With doubles it
-  matches Lua 5.4 *float* `//`; integer `//` needs Tier 3.
-- Native bitwise operators `& | ~ << >>`: parse them and lower to the existing
-  `bit.*` fast functions / IR. Semantics match for values in the safe range;
-  full 64-bit semantics need Tier 3.
-- `utf8` library and `string.pack`/`unpack`: pure C library additions
-  (`lib_utf8.c`, extend `lib_string.c`); no VM changes.
+- `utf8` library: **DONE** (`lib_utf8.c`, a self-contained C module; no VM changes).
+- `string.pack`/`unpack`: pure C library additions; no VM changes.
+- `//` and native bitwise `& | ~ << >>`: **reclassified.** These are *not*
+  compile-time-only in LuaJIT — there are no idiv/bitwise metamethods or
+  bytecodes (arithmetic stops at `pow`; bitwise is only the `bit` library). A
+  faithful implementation needs new VM bytecodes + DynASM assembly + JIT
+  recording, i.e. Tier-3 class work. Listed here originally by mistake.
 
 **Tier 2 — `<close>` to-be-closed variables (weeks, medium risk).**
 - Track to-be-closed slots per scope; on scope exit (normal, break, goto,
