@@ -50,20 +50,21 @@ python3 benchmarks/run_benchmarks.py --quick  # fast smaller run
 
 ## Correctness
 
-`tests/run_tests.sh` runs 11 programs written in the language subset common to
+`tests/run_tests.sh` runs 12 programs written in the language subset common to
 both engines under **both** `lua54` and `luajit`, and requires their stdout to
 be **byte-for-byte identical** (the Lua 5.4.8 output is the oracle). Programs use
 explicit `string.format` so that integer-vs-float *display* differences never
 leak into the comparison.
 
 ```
-01_arithmetic  02_strings   03_tables   04_closures   05_metatables
-06_coroutines  07_errors    08_control  09_algorithms 10_const_5_4  11_utf8
+01_arithmetic  02_strings   03_tables   04_closures   05_metatables  06_coroutines
+07_errors      08_control   09_algorithms 10_const_5_4 11_utf8        12_strpack
 ```
 
-Result: **11 / 11 identical.** Case `10_const_5_4` exercises the new `<const>`
-port; `11_utf8` exercises the ported `utf8` library — both pass only because
-LuaJIT now matches Lua 5.4.8 for those features.
+Result: **12 / 12 identical.** Cases `10_const_5_4`, `11_utf8` and `12_strpack`
+exercise the ported `<const>` attribute, `utf8` library and
+`string.pack`/`unpack`/`packsize` — all pass only because LuaJIT now matches
+Lua 5.4.8 for those features.
 
 ## Performance: LuaJIT speedup over reference Lua 5.4.8
 

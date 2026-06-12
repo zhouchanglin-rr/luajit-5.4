@@ -52,5 +52,8 @@ LUALIB_API void luaL_openlibs(lua_State *L)
     lua_setfield(L, -2, lib->name);
   }
   lua_pop(L, 1);
+  /* Lua 5.3/5.4 string.pack/unpack/packsize (LuaJIT-5.4 port): add to the
+  ** 'string' table, which has just been loaded above. */
+  luaopen_string_pack(L);
 }
 
