@@ -75,6 +75,7 @@
 #include "lj_alloc.c"
 
 #include "lib_aux.c"
+#include "lib_utf8.c"
 #include "lib_base.c"
 #include "lib_math.c"
 #include "lib_string.c"
