@@ -22,8 +22,37 @@
 #include "lj_strscan.h"
 #include "lj_strfmt.h"
 #include "lj_lib.h"
+#if LJ_INT64SUBTYPE
+#include "lj_ctype.h"
+#include "lj_cdata.h"
+#endif
 
 /* -- Metamethod handling ------------------------------------------------- */
+
+#if LJ_INT64SUBTYPE
+/* Append the decimal representation of a 64-bit integer cdata (the wide
+** carrier of the Lua 5.4 integer subtype) to a string buffer, without any
+** 'LL'/'ULL' suffix, exactly like a 5.4 integer. */
+static void meta_cat_putint64(SBuf *sb, cTValue *o)
+{
+  GCcdata *cd = cdataV(o);
+  uint64_t u = *(uint64_t *)cdataptr(cd);
+  int isunsigned = cdata_isuint64(cd);
+  char buf[1+20], *p = buf+sizeof(buf);
+  int sign = 0;
+  if (!isunsigned && (int64_t)u < 0) { u = ~u+1u; sign = 1; }
+  do { *--p = (char)('0' + u % 10); } while (u /= 10);
+  if (sign) *--p = '-';
+  lj_buf_putmem(sb, p, (MSize)(buf+sizeof(buf)-p));
+}
+
+/* An operand that participates in plain (non-metamethod) concatenation:
+** strings, numbers, buffers, or the 64-bit integer subtype carrier. */
+#define tviscatok(o)	\
+  (tvisstr(o) || tvisnumber(o) || tvisbuf(o) || tvisint64(o))
+#else
+#define tviscatok(o)	(tvisstr(o) || tvisnumber(o) || tvisbuf(o))
+#endif
 
 /* String interning of metamethod names for fast indexing. */
 void lj_meta_init(lua_State *L)
@@ -240,8 +269,7 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
   int fromc = 0;
   if (left < 0) { left = -left; fromc = 1; }
   do {
-    if (!(tvisstr(top) || tvisnumber(top) || tvisbuf(top)) ||
-	!(tvisstr(top-1) || tvisnumber(top-1) || tvisbuf(top-1))) {
+    if (!tviscatok(top) || !tviscatok(top-1)) {
       cTValue *mo = lj_meta_lookup(L, top-1, MM_concat);
       if (tvisnil(mo)) {
 	mo = lj_meta_lookup(L, top, MM_concat);
@@ -283,7 +311,11 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
       do {
 	o--; tlen += tvisstr(o) ? strV(o)->len :
 		     tvisbuf(o) ? sbufxlen(bufV(o)) : STRFMT_MAXBUF_NUM;
-      } while (--left > 0 && (tvisstr(o-1) || tvisnumber(o-1)));
+      } while (--left > 0 && (tvisstr(o-1) || tvisnumber(o-1)
+#if LJ_INT64SUBTYPE
+			      || tvisint64(o-1)
+#endif
+			      ));
       if (tlen >= LJ_MAX_STR) lj_err_msg(L, LJ_ERR_STROV);
       sb = lj_buf_tmp_(L);
       lj_buf_more(sb, (MSize)tlen);
@@ -297,6 +329,10 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
 	  lj_buf_putmem(sb, sbx->r, sbufxlen(sbx));
 	} else if (tvisint(o)) {
 	  lj_strfmt_putint(sb, intV(o));
+#if LJ_INT64SUBTYPE
+	} else if (tvisint64(o)) {
+	  meta_cat_putint64(sb, o);
+#endif
 	} else {
 #if LJ_DUALNUM
 	  MSize n0 = sbuflen(sb);

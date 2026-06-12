@@ -581,6 +581,11 @@ GCstr *lj_ctype_repr_int64(lua_State *L, uint64_t n, int isunsigned)
   char buf[1+20+3];
   char *p = buf+sizeof(buf);
   int sign = 0;
+#if LJ_INT64SUBTYPE
+  /* Lua 5.4 integer subtype: render the 64-bit integer carrier as a plain
+  ** decimal integer (no 'LL'/'ULL' suffix), exactly like a 5.4 integer. */
+  if (!isunsigned && (int64_t)n < 0) { n = ~n+1u; sign = 1; }
+#else
   *--p = 'L'; *--p = 'L';
   if (isunsigned) {
     *--p = 'U';
@@ -588,6 +593,7 @@ GCstr *lj_ctype_repr_int64(lua_State *L, uint64_t n, int isunsigned)
     n = ~n+1u;
     sign = 1;
   }
+#endif
   do { *--p = (char)('0' + n % 10); } while (n /= 10);
   if (sign) *--p = '-';
   return lj_str_new(L, p, (size_t)(buf+sizeof(buf)-p));

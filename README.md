@@ -25,17 +25,20 @@ LuaJIT's parser.
 ```
 vendor/lua-5.4.8/   Reference Lua 5.4.8 source (lua/lua @ tag v5.4.8)
 vendor/luajit/      LuaJIT 2.1 source + the <const> and integer-subtype ports
-scripts/build.sh    Builds lua54, luajit (standard) and luajit-int (subtype)
+scripts/build.sh    Builds lua54, luajit (standard), luajit-int (32-bit subtype)
+                    and luajit-int64 (experimental 64-bit subtype)
 tests/cases/*.lua   Cross-engine correctness cases (common 5.1/5.4 subset)
 tests/run_tests.sh  Runs every case on BOTH engines, requires identical stdout
 tests/show_differences.sh  Probes Lua 5.4 features to catalog porting gaps
 tests/check_5x_syntax.sh   Audits Lua 5.3/5.4 feature support
-tests/integer_subtype.sh   Validates the integer/float subtype (luajit-int)
+tests/integer_subtype.sh   Validates the 32-bit integer/float subtype (luajit-int)
+tests/integer64.sh         Validates the 64-bit integer subtype (luajit-int64)
 benchmarks/*.lua    Classic Lua benchmarks (checksummed)
 benchmarks/run_benchmarks.py  Times both engines, verifies output, reports speedup
 port/               Standalone reference diffs of the LuaJIT ports
 docs/PORTING.md     Feature-by-feature porting analysis and roadmap
 docs/INTEGER_SUBTYPE_PLAN.md  Design + plan for the integer/float subtype
+docs/INT64_VM_PLAN.md         Design + boundaries of the 64-bit integer VM work
 ```
 
 ## Quick start
@@ -44,6 +47,8 @@ docs/INTEGER_SUBTYPE_PLAN.md  Design + plan for the integer/float subtype
 scripts/build.sh                 # build build/bin/lua54 and build/bin/luajit
 tests/run_tests.sh               # correctness: LuaJIT output == Lua 5.4.8
 tests/show_differences.sh        # catalog of remaining 5.4 feature gaps
+tests/integer_subtype.sh         # 32-bit integer/float subtype parity (luajit-int)
+tests/integer64.sh               # 64-bit integer subtype parity (luajit-int64)
 python3 benchmarks/run_benchmarks.py          # full performance comparison
 python3 benchmarks/run_benchmarks.py --quick  # fast smaller run
 ```
@@ -130,6 +135,37 @@ build that implements a real runtime **integer/float subtype** (Lua 5.3/5.4):
 why the *standard* `luajit` (all-double, exact to 2^53) remains the baseline for
 the benchmark/correctness comparison, and the full 64-bit subtype is tracked as
 Milestone 2 in [docs/INTEGER_SUBTYPE_PLAN.md](docs/INTEGER_SUBTYPE_PLAN.md).
+
+## Experimental 64-bit integer subtype (`luajit-int64`)
+
+`scripts/build.sh` also produces `build/bin/luajit-int64`, the Tier-3 VM step:
+an experimental **64-bit** integer subtype. Out-of-32-bit integer values are
+carried as boxed `int64`/`uint64` cdata — the one value LuaJIT already supports
+with exact 64-bit two's-complement arithmetic — and the Lua surface is made to
+treat that carrier as the 5.4 integer subtype.
+
+Matching Lua 5.4 (verified **28/28** in `tests/integer64.sh`):
+
+- `math.maxinteger`/`math.mininteger` are exact (`9223372036854775807` /
+  `-9223372036854775808`), and `math.maxinteger + 1 == math.mininteger`;
+- large integer literals are exact past 2^53 (`print(9007199254740993)`);
+- 64-bit arithmetic and wraparound (`math.maxinteger * 2` → `-2`);
+- `/` and `^` always produce a float; mixing an integer with a float promotes to
+  float (Lua 5.4 rules);
+- 5.4-style integer display (no `LL` suffix) via `tostring`, `..`, `string.format`;
+- `math.type`/`math.tointeger` work across the full 64-bit range;
+- the JIT is kept **consistent with the interpreter** (it bails on int64-carrier
+  arithmetic rather than lowering it with C semantics).
+
+**Boundary (honest):** the int32→int64 **overflow promotion lives in the DynASM
+assembly interpreter**, so values produced by arithmetic that overflows 32 bits
+(loop sums, `a*a`, even constant-folded `1000000*1000000`) still become *float*,
+not a 64-bit integer. int64 cdata used as a table key is by-identity, and
+int/float comparison at 64-bit magnitude uses double conversion. These are
+labelled as expected DIFFs in `tests/integer64.sh` and analysed, with the
+remaining VM path, in [docs/INT64_VM_PLAN.md](docs/INT64_VM_PLAN.md). All changes
+are gated behind `LUAJIT_ENABLE_INT64SUBTYPE`, so the standard `luajit` and the
+32-bit `luajit-int` builds are unaffected.
 
 ## Remaining gaps and roadmap
 

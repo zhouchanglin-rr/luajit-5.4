@@ -17,6 +17,12 @@
 #include "lj_lib.h"
 #include "lj_vm.h"
 #include "lj_prng.h"
+#if LJ_INT64SUBTYPE
+#include "lj_gc.h"
+#include "lj_ctype.h"
+#include "lj_cdata.h"
+#include "lj_state.h"
+#endif
 
 /* ------------------------------------------------------------------------ */
 
@@ -193,15 +199,41 @@ LJLIB_CF(math_randomseed)
 
 /* ------------------------------------------------------------------------ */
 
+#if LJ_INT64SUBTYPE
+/* Push a 64-bit integer as the Lua 5.4 integer subtype. Values that fit the
+** native 32-bit dual-number integer use the fast tagged representation; wider
+** values are boxed as int64_t cdata (the wide carrier). */
+static void math_pushint64(lua_State *L, int64_t v)
+{
+  if (v >= -(int64_t)0x80000000 && v <= (int64_t)0x7fffffff) {
+    setintV(L->top, (int32_t)v);
+    incr_top(L);
+  } else {
+    GCcdata *cd;
+    ctype_loadffi(L);
+    cd = lj_cdata_new_(L, CTID_INT64, 8);
+    *(int64_t *)cdataptr(cd) = v;
+    setcdataV(L, L->top, cd);
+    incr_top(L);
+    lj_gc_check(L);
+  }
+}
+#endif
+
 /* Lua 5.3/5.4 integer subtype introspection.
 ** With LJ_DUALNUM, numbers carry a runtime integer-vs-float tag; expose it.
 ** With single-number mode there is no integer subtype, so every number is a
-** float (and these report that honestly). */
+** float (and these report that honestly). With LJ_INT64SUBTYPE, the wide
+** int64 carrier is also recognised as the integer subtype. */
 LJLIB_CF(math_type)
 {
   TValue *o = lj_lib_checkany(L, 1);
   if (tvisint(o))
     lua_pushliteral(L, "integer");
+#if LJ_INT64SUBTYPE
+  else if (tvisint64(o))
+    lua_pushliteral(L, "integer");
+#endif
   else if (tvisnum(o))
     lua_pushliteral(L, "float");
   else
@@ -214,6 +246,19 @@ LJLIB_CF(math_tointeger)
   TValue *o = lj_lib_checkany(L, 1);
   if (tvisint(o)) {
     lua_pushinteger(L, intV(o));
+#if LJ_INT64SUBTYPE
+  } else if (tvisint64(o)) {
+    lua_pushvalue(L, 1);  /* A wide integer is already an integer. */
+  } else if (tvisnum(o)) {
+    double d = numV(o);
+    /* Lua 5.4: a float with an exact integral value within the 64-bit integer
+    ** range converts to an integer; otherwise the result is nil. */
+    if (d >= -9223372036854775808.0 && d < 9223372036854775808.0) {
+      int64_t i = (int64_t)d;
+      if ((double)i == d) { math_pushint64(L, i); return 1; }
+    }
+    lua_pushnil(L);
+#else
   } else if (tvisnum(o)) {
     double d = numV(o);
     int32_t k = (int32_t)d;
@@ -221,6 +266,7 @@ LJLIB_CF(math_tointeger)
       lua_pushinteger(L, k);
     else
       lua_pushnil(L);
+#endif
   } else {
     lua_pushnil(L);
   }
@@ -236,7 +282,22 @@ LUALIB_API int luaopen_math(lua_State *L)
   PRNGState *rs = (PRNGState *)lua_newuserdata(L, sizeof(PRNGState));
   lj_prng_seed_fixed(rs);
   LJ_LIB_REG(L, LUA_MATHLIBNAME, math);
-#if LJ_DUALNUM
+#if LJ_INT64SUBTYPE
+  /* True 64-bit integer range, carried as int64 cdata (Lua 5.4 values). */
+  {
+    GCcdata *cd;
+    ctype_loadffi(L);
+    cd = lj_cdata_new_(L, CTID_INT64, 8);
+    *(int64_t *)cdataptr(cd) = (int64_t)0x7fffffffffffffffLL;
+    setcdataV(L, L->top, cd); incr_top(L);
+    lua_setfield(L, -2, "maxinteger");
+    cd = lj_cdata_new_(L, CTID_INT64, 8);
+    *(uint64_t *)cdataptr(cd) = (uint64_t)0x8000000000000000ULL;
+    setcdataV(L, L->top, cd); incr_top(L);
+    lua_setfield(L, -2, "mininteger");
+    lj_gc_check(L);
+  }
+#elif LJ_DUALNUM
   /* Integer range of this build's subtype (32-bit in dual-number mode). */
   lua_pushinteger(L, 0x7fffffff); lua_setfield(L, -2, "maxinteger");
   lua_pushinteger(L, (int32_t)0x80000000); lua_setfield(L, -2, "mininteger");

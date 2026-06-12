@@ -1524,6 +1524,21 @@ void LJ_FASTCALL recff_cdata_arith(jit_State *J, RecordFFData *rd)
   TRef sp[2];
   CType *s[2];
   MSize i;
+#if LJ_INT64SUBTYPE
+  /* The interpreter implements Lua 5.4 semantics for the 64-bit integer
+  ** subtype (e.g. '/' and '^' always yield a float, and mixing with a float
+  ** promotes to float). The trace recorder lowers cdata int64 arithmetic with
+  ** plain C semantics instead, so bail out here whenever a 64-bit integer
+  ** carrier is involved and let the operation run in the interpreter. This
+  ** keeps JIT-compiled results identical to interpreted ones. */
+  for (i = 0; i < 2; i++) {
+    if (J->base[i]) {
+      cTValue *o = &rd->argv[i];
+      if (tviscdata(o) && cdata_isint64(cdataV(o)))
+	lj_trace_err(J, LJ_TRERR_BADTYPE);
+    }
+  }
+#endif
   for (i = 0; i < 2; i++) {
     TRef tr = J->base[i];
     CType *ct = ctype_get(cts, CTID_DOUBLE);
