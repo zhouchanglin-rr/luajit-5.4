@@ -54,9 +54,38 @@ After this milestone, `math.type`, integer-vs-float distinction for literals and
 arithmetic, integer printing, and float `.0` printing all match Lua 5.4 **within
 the 32-bit integer range**.
 
-### Milestone 2 (future) — true 64-bit integers
+### Milestone 2 (implemented, experimental) — true 64-bit integers
 
-This is the large, high-risk work and is **out of scope here**. It requires:
+Milestone 2 is now available in the `luajit-int64` build (built by
+`scripts/build.sh` with `-DLUAJIT_ENABLE_INT64SUBTYPE`). It is an experimental,
+interpreter-level 64-bit integer subtype, documented in full — design,
+implementation and honest boundaries — in
+[INT64_VM_PLAN.md](INT64_VM_PLAN.md). Summary:
+
+- **Carrier.** Integer values that do not fit the 32-bit dual-number integer
+  are carried as boxed `int64_t`/`uint64_t` cdata, which the VM already supports
+  with exact two's-complement arithmetic and wraparound.
+- **Correct now (verified 28/28 vs Lua 5.4.8 in `tests/integer64.sh`):**
+  `math.maxinteger`/`mininteger` (exact `±2^63`), `math.type`/`math.tointeger`
+  over the 64-bit range, large integer literals (`> 2^53`), 64-bit arithmetic
+  and wraparound, `/` and `^` always producing floats, float-mixing promoting to
+  float, and 5.4-style integer display (`tostring`/`..`/`string.format`).
+- **JIT-consistent.** The trace recorder bails on int64-carrier arithmetic so
+  compiled and interpreted results are identical (the cost: such arithmetic is
+  not JIT-compiled in this build).
+- **Still differs (documented boundaries):** arithmetic that overflows a 32-bit
+  integer promotes to *float* (the overflow path lives in the DynASM assembly
+  interpreter); int64 cdata table keys are by-identity not by-value; int/float
+  comparison at 64-bit magnitude uses double conversion.
+
+The remaining VM work — assembly overflow promotion, a real 64-bit JIT IR,
+table-key canonicalisation and exact comparison — is laid out in
+[INT64_VM_PLAN.md](INT64_VM_PLAN.md). The notes below describe the original,
+not-yet-done state of that work.
+
+### Milestone 2 (original blocker analysis) — true 64-bit integers
+
+This is the large, high-risk work. It requires:
 
 - a value representation that can hold a 64-bit integer (e.g. boxing like the
   FFI's `int64_t` cdata, or a different tagging scheme) — the core blocker;

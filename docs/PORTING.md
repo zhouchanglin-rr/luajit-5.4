@@ -66,9 +66,9 @@ behaviour LuaJIT does not match; `SAME` = already compatible.
 | float prints as `3.0` (5.4) vs `3` (jit) | DIFF | display of the float subtype |
 | floor division `//` | DIFF | operator absent in LuaJIT lexer/parser |
 | native bitwise `& \| ~ << >>` | DIFF | LuaJIT uses the `bit` library instead |
-| `math.maxinteger` / `math.mininteger` | DIFF | no 64-bit integer subtype |
-| 64-bit integer exactness `> 2^53` | DIFF | doubles lose precision; int64 is exact |
-| integer overflow wraps | DIFF | depends on the integer subtype |
+| `math.maxinteger` / `math.mininteger` | DIFF (luajit-int64: **SAME**) | exact ±2^63 as int64 carrier |
+| 64-bit integer exactness `> 2^53` | DIFF (luajit-int64: **SAME** for literals/explicit values) | int64 carrier is exact; arithmetic-overflow-derived values still promote to float |
+| integer overflow wraps | DIFF (luajit-int64: **SAME** on 64-bit values) | exact 64-bit two's-complement wrap on the carrier |
 | `math.tointeger` | DIFF | no integer subtype |
 | `string.pack` / `string.unpack` | DIFF | library not present |
 | string→number coercion keeps integer | DIFF | depends on integer subtype |
@@ -136,6 +136,15 @@ produces identical output, including observing the compile error via `load()`.
   constant encoding, `tostring`/formatting, table key hashing, and the FFI all
   assume the dual-number model. This is the work that makes a "LuaJIT for 5.4"
   genuinely hard and is why no complete community port exists.
+- **Status: a first, experimental slice is implemented** in the `luajit-int64`
+  build, see [INT64_VM_PLAN.md](INT64_VM_PLAN.md). It carries out-of-int32
+  integers as int64 cdata, so `math.maxinteger`, large literals, 64-bit
+  arithmetic/wraparound, `/`-and-`^`-as-float and 5.4-style integer display all
+  match Lua 5.4 in the interpreter (28/28 in `tests/integer64.sh`), and the JIT
+  is kept consistent by bailing on int64-carrier arithmetic. The remaining,
+  genuinely VM-deep pieces — int32→int64 **overflow promotion in the DynASM
+  assembly interpreter**, a real 64-bit JIT IR, integer table-key
+  canonicalisation and exact int/float comparison — are scoped in that doc.
 
 **Tier 4 — runtime/library tail.**
 - Remaining library and metamethod deltas (`__close`, integer-aware

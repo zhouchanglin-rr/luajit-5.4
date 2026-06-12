@@ -1,0 +1,402 @@
+Experimental Lua 5.4 64-bit integer subtype for LuaJIT (Tier-3 VM work).
+
+Gated behind LUAJIT_ENABLE_INT64SUBTYPE (=> LJ_INT64SUBTYPE, requires
+LJ_DUALNUM && LJ_HASFFI). Carries out-of-int32 integer values as boxed
+int64/uint64 cdata. See docs/INT64_VM_PLAN.md for design and boundaries.
+
+Reference diff against the upstream LuaJIT source (vendor/luajit/src).
+---
+diff --git a/vendor/luajit/src/lib_math.c b/vendor/luajit/src/lib_math.c
+index 053dd76..06bd539 100644
+--- a/vendor/luajit/src/lib_math.c
++++ b/vendor/luajit/src/lib_math.c
+@@ -17,6 +17,12 @@
+ #include "lj_lib.h"
+ #include "lj_vm.h"
+ #include "lj_prng.h"
++#if LJ_INT64SUBTYPE
++#include "lj_gc.h"
++#include "lj_ctype.h"
++#include "lj_cdata.h"
++#include "lj_state.h"
++#endif
+ 
+ /* ------------------------------------------------------------------------ */
+ 
+@@ -193,15 +199,41 @@ LJLIB_CF(math_randomseed)
+ 
+ /* ------------------------------------------------------------------------ */
+ 
++#if LJ_INT64SUBTYPE
++/* Push a 64-bit integer as the Lua 5.4 integer subtype. Values that fit the
++** native 32-bit dual-number integer use the fast tagged representation; wider
++** values are boxed as int64_t cdata (the wide carrier). */
++static void math_pushint64(lua_State *L, int64_t v)
++{
++  if (v >= -(int64_t)0x80000000 && v <= (int64_t)0x7fffffff) {
++    setintV(L->top, (int32_t)v);
++    incr_top(L);
++  } else {
++    GCcdata *cd;
++    ctype_loadffi(L);
++    cd = lj_cdata_new_(L, CTID_INT64, 8);
++    *(int64_t *)cdataptr(cd) = v;
++    setcdataV(L, L->top, cd);
++    incr_top(L);
++    lj_gc_check(L);
++  }
++}
++#endif
++
+ /* Lua 5.3/5.4 integer subtype introspection.
+ ** With LJ_DUALNUM, numbers carry a runtime integer-vs-float tag; expose it.
+ ** With single-number mode there is no integer subtype, so every number is a
+-** float (and these report that honestly). */
++** float (and these report that honestly). With LJ_INT64SUBTYPE, the wide
++** int64 carrier is also recognised as the integer subtype. */
+ LJLIB_CF(math_type)
+ {
+   TValue *o = lj_lib_checkany(L, 1);
+   if (tvisint(o))
+     lua_pushliteral(L, "integer");
++#if LJ_INT64SUBTYPE
++  else if (tvisint64(o))
++    lua_pushliteral(L, "integer");
++#endif
+   else if (tvisnum(o))
+     lua_pushliteral(L, "float");
+   else
+@@ -214,6 +246,19 @@ LJLIB_CF(math_tointeger)
+   TValue *o = lj_lib_checkany(L, 1);
+   if (tvisint(o)) {
+     lua_pushinteger(L, intV(o));
++#if LJ_INT64SUBTYPE
++  } else if (tvisint64(o)) {
++    lua_pushvalue(L, 1);  /* A wide integer is already an integer. */
++  } else if (tvisnum(o)) {
++    double d = numV(o);
++    /* Lua 5.4: a float with an exact integral value within the 64-bit integer
++    ** range converts to an integer; otherwise the result is nil. */
++    if (d >= -9223372036854775808.0 && d < 9223372036854775808.0) {
++      int64_t i = (int64_t)d;
++      if ((double)i == d) { math_pushint64(L, i); return 1; }
++    }
++    lua_pushnil(L);
++#else
+   } else if (tvisnum(o)) {
+     double d = numV(o);
+     int32_t k = (int32_t)d;
+@@ -221,6 +266,7 @@ LJLIB_CF(math_tointeger)
+       lua_pushinteger(L, k);
+     else
+       lua_pushnil(L);
++#endif
+   } else {
+     lua_pushnil(L);
+   }
+@@ -236,7 +282,22 @@ LUALIB_API int luaopen_math(lua_State *L)
+   PRNGState *rs = (PRNGState *)lua_newuserdata(L, sizeof(PRNGState));
+   lj_prng_seed_fixed(rs);
+   LJ_LIB_REG(L, LUA_MATHLIBNAME, math);
+-#if LJ_DUALNUM
++#if LJ_INT64SUBTYPE
++  /* True 64-bit integer range, carried as int64 cdata (Lua 5.4 values). */
++  {
++    GCcdata *cd;
++    ctype_loadffi(L);
++    cd = lj_cdata_new_(L, CTID_INT64, 8);
++    *(int64_t *)cdataptr(cd) = (int64_t)0x7fffffffffffffffLL;
++    setcdataV(L, L->top, cd); incr_top(L);
++    lua_setfield(L, -2, "maxinteger");
++    cd = lj_cdata_new_(L, CTID_INT64, 8);
++    *(uint64_t *)cdataptr(cd) = (uint64_t)0x8000000000000000ULL;
++    setcdataV(L, L->top, cd); incr_top(L);
++    lua_setfield(L, -2, "mininteger");
++    lj_gc_check(L);
++  }
++#elif LJ_DUALNUM
+   /* Integer range of this build's subtype (32-bit in dual-number mode). */
+   lua_pushinteger(L, 0x7fffffff); lua_setfield(L, -2, "maxinteger");
+   lua_pushinteger(L, (int32_t)0x80000000); lua_setfield(L, -2, "mininteger");
+diff --git a/vendor/luajit/src/lj_arch.h b/vendor/luajit/src/lj_arch.h
+index 3c4e3f9..9184243 100644
+--- a/vendor/luajit/src/lj_arch.h
++++ b/vendor/luajit/src/lj_arch.h
+@@ -621,6 +621,20 @@
+ #define LJ_HASFFI		1
+ #endif
+ 
++/* Experimental Lua 5.4 64-bit integer subtype (port, Tier-3 VM work).
++** When enabled, integer values that do not fit LuaJIT's native 32-bit
++** dual-number integer are carried as boxed int64_t/uint64_t cdata, which the
++** VM already supports with exact 64-bit two's-complement arithmetic. This
++** makes math.maxinteger, large integer literals, 64-bit wraparound and
++** 5.4-style integer printing observable in the interpreter. Requires
++** dual-number mode (for the 32-bit fast path) and the FFI (for the carrier).
++** See docs/INT64_VM_PLAN.md for the design, scope and known boundaries. */
++#if defined(LUAJIT_ENABLE_INT64SUBTYPE) && LJ_DUALNUM && LJ_HASFFI
++#define LJ_INT64SUBTYPE		1
++#else
++#define LJ_INT64SUBTYPE		0
++#endif
++
+ /* Disable or enable the string buffer extension. */
+ #if defined(LUAJIT_DISABLE_BUFFER)
+ #define LJ_HASBUFFER		0
+diff --git a/vendor/luajit/src/lj_carith.c b/vendor/luajit/src/lj_carith.c
+index cb408fb..a55a5dd 100644
+--- a/vendor/luajit/src/lj_carith.c
++++ b/vendor/luajit/src/lj_carith.c
+@@ -17,6 +17,9 @@
+ #include "lj_cdata.h"
+ #include "lj_carith.h"
+ #include "lj_strscan.h"
++#if LJ_INT64SUBTYPE
++#include "lj_vm.h"
++#endif
+ 
+ /* -- C data arithmetic --------------------------------------------------- */
+ 
+@@ -163,6 +166,42 @@ static int carith_int64(lua_State *L, CTState *cts, CDArith *ca, MMS mm)
+ {
+   if (ctype_isnum(ca->ct[0]->info) && ca->ct[0]->size <= 8 &&
+       ctype_isnum(ca->ct[1]->info) && ca->ct[1]->size <= 8) {
++#if LJ_INT64SUBTYPE
++    /* Lua 5.4: arithmetic that mixes the integer subtype with a float yields a
++    ** float. Also, '/' and '^' always yield a float, even for two integers.
++    ** LuaJIT's default cdata arithmetic would instead do integer division and
++    ** coerce float operands to integers; restore 5.4 semantics here for the
++    ** 64-bit integer subtype carrier. */
++    if ((ca->ct[0]->info & CTF_FP) || (ca->ct[1]->info & CTF_FP) ||
++	mm == MM_div || mm == MM_pow) {
++      CType *ctd = ctype_get(cts, CTID_DOUBLE);
++      double d0, d1 = 0;
++      lj_cconv_ct_ct(cts, ctd, ca->ct[0], (uint8_t *)&d0, ca->p[0], 0);
++      if (mm != MM_unm)
++	lj_cconv_ct_ct(cts, ctd, ca->ct[1], (uint8_t *)&d1, ca->p[1], 0);
++      switch (mm) {
++      case MM_eq: setboolV(L->top-1, d0 == d1); return 1;
++      case MM_lt: setboolV(L->top-1, d0 < d1); return 1;
++      case MM_le: setboolV(L->top-1, d0 <= d1); return 1;
++      case MM_add: setnumV(L->top-1, lj_vm_foldarith(d0, d1, IR_ADD-IR_ADD));
++		   return 1;
++      case MM_sub: setnumV(L->top-1, lj_vm_foldarith(d0, d1, IR_SUB-IR_ADD));
++		   return 1;
++      case MM_mul: setnumV(L->top-1, lj_vm_foldarith(d0, d1, IR_MUL-IR_ADD));
++		   return 1;
++      case MM_div: setnumV(L->top-1, lj_vm_foldarith(d0, d1, IR_DIV-IR_ADD));
++		   return 1;
++      case MM_mod: setnumV(L->top-1, lj_vm_foldarith(d0, d1, IR_MOD-IR_ADD));
++		   return 1;
++      case MM_pow: setnumV(L->top-1, lj_vm_foldarith(d0, d1, IR_POW-IR_ADD));
++		   return 1;
++      case MM_unm: setnumV(L->top-1, lj_vm_foldarith(d0, d1, IR_NEG-IR_ADD));
++		   return 1;
++      default: break;
++      }
++    }
++#endif
++    {
+     CTypeID id = (((ca->ct[0]->info & CTF_UNSIGNED) && ca->ct[0]->size == 8) ||
+ 		  ((ca->ct[1]->info & CTF_UNSIGNED) && ca->ct[1]->size == 8)) ?
+ 		 CTID_UINT64 : CTID_INT64;
+@@ -218,6 +257,7 @@ static int carith_int64(lua_State *L, CTState *cts, CDArith *ca, MMS mm)
+     }
+     lj_gc_check(L);
+     return 1;
++    }
+   }
+   return 0;
+ }
+diff --git a/vendor/luajit/src/lj_crecord.c b/vendor/luajit/src/lj_crecord.c
+index 4be36ec..7677570 100644
+--- a/vendor/luajit/src/lj_crecord.c
++++ b/vendor/luajit/src/lj_crecord.c
+@@ -1524,6 +1524,21 @@ void LJ_FASTCALL recff_cdata_arith(jit_State *J, RecordFFData *rd)
+   TRef sp[2];
+   CType *s[2];
+   MSize i;
++#if LJ_INT64SUBTYPE
++  /* The interpreter implements Lua 5.4 semantics for the 64-bit integer
++  ** subtype (e.g. '/' and '^' always yield a float, and mixing with a float
++  ** promotes to float). The trace recorder lowers cdata int64 arithmetic with
++  ** plain C semantics instead, so bail out here whenever a 64-bit integer
++  ** carrier is involved and let the operation run in the interpreter. This
++  ** keeps JIT-compiled results identical to interpreted ones. */
++  for (i = 0; i < 2; i++) {
++    if (J->base[i]) {
++      cTValue *o = &rd->argv[i];
++      if (tviscdata(o) && cdata_isint64(cdataV(o)))
++	lj_trace_err(J, LJ_TRERR_BADTYPE);
++    }
++  }
++#endif
+   for (i = 0; i < 2; i++) {
+     TRef tr = J->base[i];
+     CType *ct = ctype_get(cts, CTID_DOUBLE);
+diff --git a/vendor/luajit/src/lj_ctype.c b/vendor/luajit/src/lj_ctype.c
+index 89bb186..0daffcf 100644
+--- a/vendor/luajit/src/lj_ctype.c
++++ b/vendor/luajit/src/lj_ctype.c
+@@ -581,6 +581,11 @@ GCstr *lj_ctype_repr_int64(lua_State *L, uint64_t n, int isunsigned)
+   char buf[1+20+3];
+   char *p = buf+sizeof(buf);
+   int sign = 0;
++#if LJ_INT64SUBTYPE
++  /* Lua 5.4 integer subtype: render the 64-bit integer carrier as a plain
++  ** decimal integer (no 'LL'/'ULL' suffix), exactly like a 5.4 integer. */
++  if (!isunsigned && (int64_t)n < 0) { n = ~n+1u; sign = 1; }
++#else
+   *--p = 'L'; *--p = 'L';
+   if (isunsigned) {
+     *--p = 'U';
+@@ -588,6 +593,7 @@ GCstr *lj_ctype_repr_int64(lua_State *L, uint64_t n, int isunsigned)
+     n = ~n+1u;
+     sign = 1;
+   }
++#endif
+   do { *--p = (char)('0' + n % 10); } while (n /= 10);
+   if (sign) *--p = '-';
+   return lj_str_new(L, p, (size_t)(buf+sizeof(buf)-p));
+diff --git a/vendor/luajit/src/lj_ctype.h b/vendor/luajit/src/lj_ctype.h
+index 43d507b..eb3c477 100644
+--- a/vendor/luajit/src/lj_ctype.h
++++ b/vendor/luajit/src/lj_ctype.h
+@@ -316,6 +316,16 @@ CTTYDEF(CTTYIDDEF)
+   CTID_MAX = 65536
+ };
+ 
++#if LJ_INT64SUBTYPE
++/* Lua 5.4 integer subtype carrier: a cdata holding a 64-bit int64_t/uint64_t.
++** These are the "wide" representation of the integer subtype (values that do
++** not fit LuaJIT's native 32-bit dual-number integer). */
++#define cdata_isint64(cd)	\
++  ((cd)->ctypeid == CTID_INT64 || (cd)->ctypeid == CTID_UINT64)
++#define cdata_isuint64(cd)	((cd)->ctypeid == CTID_UINT64)
++#define tvisint64(o)		(tviscdata(o) && cdata_isint64(cdataV(o)))
++#endif
++
+ /* Target-dependent type IDs. */
+ #if LJ_64
+ #define CTID_INT_PSZ	CTID_INT64
+diff --git a/vendor/luajit/src/lj_lex.c b/vendor/luajit/src/lj_lex.c
+index d3759cd..7d8c02b 100644
+--- a/vendor/luajit/src/lj_lex.c
++++ b/vendor/luajit/src/lj_lex.c
+@@ -20,6 +20,10 @@
+ #include "lj_cdata.h"
+ #include "lualib.h"
+ #endif
++#if LJ_INT64SUBTYPE
++#include <stdlib.h>
++#include <errno.h>
++#endif
+ #include "lj_state.h"
+ #include "lj_lex.h"
+ #include "lj_parse.h"
+@@ -120,6 +124,28 @@ static void lex_number(LexState *ls, TValue *tv)
+     fmt = lj_strscan_scan((const uint8_t *)ls->sb.b, sbuflen(&ls->sb)-1, tv,
+ 	    (isflt ? STRSCAN_OPT_TONUM : STRSCAN_OPT_TOINT) |
+ 	    (LJ_HASFFI ? (STRSCAN_OPT_LL|STRSCAN_OPT_IMAG) : 0));
++#if LJ_INT64SUBTYPE
++    /* Lua 5.4 64-bit integer literal. An integer literal (no float marker)
++    ** that overflowed the 32-bit fast path comes back as STRSCAN_NUM (double).
++    ** Re-parse it as a 64-bit integer and carry it as int64/uint64 cdata, so
++    ** values up to 2^63-1 stay exact integers. A decimal literal above
++    ** INT64_MAX stays a float (Lua 5.4 rule); a hex literal wraps mod 2^64. */
++    if (!isflt && fmt == STRSCAN_NUM) {
++      const char *b = ls->sb.b;
++      int base = (b[0] == '0' && (b[1] == 'x' || b[1] == 'X')) ? 16 : 10;
++      char *endp;
++      uint64_t u;
++      errno = 0;
++      u = (uint64_t)strtoull(b, &endp, base);
++      if (errno == 0 && *endp == '\0') {
++	if (u <= (uint64_t)0x7fffffffffffffffULL) {
++	  tv->u64 = u; fmt = STRSCAN_I64;
++	} else if (base == 16) {
++	  tv->u64 = u; fmt = STRSCAN_U64;
++	}  /* else: decimal literal > INT64_MAX -> keep as float. */
++      }
++    }
++#endif
+   }
+ #else
+   fmt = lj_strscan_scan((const uint8_t *)ls->sb.b, sbuflen(&ls->sb)-1, tv,
+diff --git a/vendor/luajit/src/lj_meta.c b/vendor/luajit/src/lj_meta.c
+index bb1be5c..149d162 100644
+--- a/vendor/luajit/src/lj_meta.c
++++ b/vendor/luajit/src/lj_meta.c
+@@ -22,9 +22,38 @@
+ #include "lj_strscan.h"
+ #include "lj_strfmt.h"
+ #include "lj_lib.h"
++#if LJ_INT64SUBTYPE
++#include "lj_ctype.h"
++#include "lj_cdata.h"
++#endif
+ 
+ /* -- Metamethod handling ------------------------------------------------- */
+ 
++#if LJ_INT64SUBTYPE
++/* Append the decimal representation of a 64-bit integer cdata (the wide
++** carrier of the Lua 5.4 integer subtype) to a string buffer, without any
++** 'LL'/'ULL' suffix, exactly like a 5.4 integer. */
++static void meta_cat_putint64(SBuf *sb, cTValue *o)
++{
++  GCcdata *cd = cdataV(o);
++  uint64_t u = *(uint64_t *)cdataptr(cd);
++  int isunsigned = cdata_isuint64(cd);
++  char buf[1+20], *p = buf+sizeof(buf);
++  int sign = 0;
++  if (!isunsigned && (int64_t)u < 0) { u = ~u+1u; sign = 1; }
++  do { *--p = (char)('0' + u % 10); } while (u /= 10);
++  if (sign) *--p = '-';
++  lj_buf_putmem(sb, p, (MSize)(buf+sizeof(buf)-p));
++}
++
++/* An operand that participates in plain (non-metamethod) concatenation:
++** strings, numbers, buffers, or the 64-bit integer subtype carrier. */
++#define tviscatok(o)	\
++  (tvisstr(o) || tvisnumber(o) || tvisbuf(o) || tvisint64(o))
++#else
++#define tviscatok(o)	(tvisstr(o) || tvisnumber(o) || tvisbuf(o))
++#endif
++
+ /* String interning of metamethod names for fast indexing. */
+ void lj_meta_init(lua_State *L)
+ {
+@@ -240,8 +269,7 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
+   int fromc = 0;
+   if (left < 0) { left = -left; fromc = 1; }
+   do {
+-    if (!(tvisstr(top) || tvisnumber(top) || tvisbuf(top)) ||
+-	!(tvisstr(top-1) || tvisnumber(top-1) || tvisbuf(top-1))) {
++    if (!tviscatok(top) || !tviscatok(top-1)) {
+       cTValue *mo = lj_meta_lookup(L, top-1, MM_concat);
+       if (tvisnil(mo)) {
+ 	mo = lj_meta_lookup(L, top, MM_concat);
+@@ -283,7 +311,11 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
+       do {
+ 	o--; tlen += tvisstr(o) ? strV(o)->len :
+ 		     tvisbuf(o) ? sbufxlen(bufV(o)) : STRFMT_MAXBUF_NUM;
+-      } while (--left > 0 && (tvisstr(o-1) || tvisnumber(o-1)));
++      } while (--left > 0 && (tvisstr(o-1) || tvisnumber(o-1)
++#if LJ_INT64SUBTYPE
++			      || tvisint64(o-1)
++#endif
++			      ));
+       if (tlen >= LJ_MAX_STR) lj_err_msg(L, LJ_ERR_STROV);
+       sb = lj_buf_tmp_(L);
+       lj_buf_more(sb, (MSize)tlen);
+@@ -297,6 +329,10 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
+ 	  lj_buf_putmem(sb, sbx->r, sbufxlen(sbx));
+ 	} else if (tvisint(o)) {
+ 	  lj_strfmt_putint(sb, intV(o));
++#if LJ_INT64SUBTYPE
++	} else if (tvisint64(o)) {
++	  meta_cat_putint64(sb, o);
++#endif
+ 	} else {
+ #if LJ_DUALNUM
+ 	  MSize n0 = sbuflen(sb);

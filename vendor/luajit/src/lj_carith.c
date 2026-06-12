@@ -17,6 +17,9 @@
 #include "lj_cdata.h"
 #include "lj_carith.h"
 #include "lj_strscan.h"
+#if LJ_INT64SUBTYPE
+#include "lj_vm.h"
+#endif
 
 /* -- C data arithmetic --------------------------------------------------- */
 
@@ -163,6 +166,42 @@ static int carith_int64(lua_State *L, CTState *cts, CDArith *ca, MMS mm)
 {
   if (ctype_isnum(ca->ct[0]->info) && ca->ct[0]->size <= 8 &&
       ctype_isnum(ca->ct[1]->info) && ca->ct[1]->size <= 8) {
+#if LJ_INT64SUBTYPE
+    /* Lua 5.4: arithmetic that mixes the integer subtype with a float yields a
+    ** float. Also, '/' and '^' always yield a float, even for two integers.
+    ** LuaJIT's default cdata arithmetic would instead do integer division and
+    ** coerce float operands to integers; restore 5.4 semantics here for the
+    ** 64-bit integer subtype carrier. */
+    if ((ca->ct[0]->info & CTF_FP) || (ca->ct[1]->info & CTF_FP) ||
+	mm == MM_div || mm == MM_pow) {
+      CType *ctd = ctype_get(cts, CTID_DOUBLE);
+      double d0, d1 = 0;
+      lj_cconv_ct_ct(cts, ctd, ca->ct[0], (uint8_t *)&d0, ca->p[0], 0);
+      if (mm != MM_unm)
+	lj_cconv_ct_ct(cts, ctd, ca->ct[1], (uint8_t *)&d1, ca->p[1], 0);
+      switch (mm) {
+      case MM_eq: setboolV(L->top-1, d0 == d1); return 1;
+      case MM_lt: setboolV(L->top-1, d0 < d1); return 1;
+      case MM_le: setboolV(L->top-1, d0 <= d1); return 1;
+      case MM_add: setnumV(L->top-1, lj_vm_foldarith(d0, d1, IR_ADD-IR_ADD));
+		   return 1;
+      case MM_sub: setnumV(L->top-1, lj_vm_foldarith(d0, d1, IR_SUB-IR_ADD));
+		   return 1;
+      case MM_mul: setnumV(L->top-1, lj_vm_foldarith(d0, d1, IR_MUL-IR_ADD));
+		   return 1;
+      case MM_div: setnumV(L->top-1, lj_vm_foldarith(d0, d1, IR_DIV-IR_ADD));
+		   return 1;
+      case MM_mod: setnumV(L->top-1, lj_vm_foldarith(d0, d1, IR_MOD-IR_ADD));
+		   return 1;
+      case MM_pow: setnumV(L->top-1, lj_vm_foldarith(d0, d1, IR_POW-IR_ADD));
+		   return 1;
+      case MM_unm: setnumV(L->top-1, lj_vm_foldarith(d0, d1, IR_NEG-IR_ADD));
+		   return 1;
+      default: break;
+      }
+    }
+#endif
+    {
     CTypeID id = (((ca->ct[0]->info & CTF_UNSIGNED) && ca->ct[0]->size == 8) ||
 		  ((ca->ct[1]->info & CTF_UNSIGNED) && ca->ct[1]->size == 8)) ?
 		 CTID_UINT64 : CTID_INT64;
@@ -218,6 +257,7 @@ static int carith_int64(lua_State *L, CTState *cts, CDArith *ca, MMS mm)
     }
     lj_gc_check(L);
     return 1;
+    }
   }
   return 0;
 }

@@ -621,6 +621,20 @@
 #define LJ_HASFFI		1
 #endif
 
+/* Experimental Lua 5.4 64-bit integer subtype (port, Tier-3 VM work).
+** When enabled, integer values that do not fit LuaJIT's native 32-bit
+** dual-number integer are carried as boxed int64_t/uint64_t cdata, which the
+** VM already supports with exact 64-bit two's-complement arithmetic. This
+** makes math.maxinteger, large integer literals, 64-bit wraparound and
+** 5.4-style integer printing observable in the interpreter. Requires
+** dual-number mode (for the 32-bit fast path) and the FFI (for the carrier).
+** See docs/INT64_VM_PLAN.md for the design, scope and known boundaries. */
+#if defined(LUAJIT_ENABLE_INT64SUBTYPE) && LJ_DUALNUM && LJ_HASFFI
+#define LJ_INT64SUBTYPE		1
+#else
+#define LJ_INT64SUBTYPE		0
+#endif
+
 /* Disable or enable the string buffer extension. */
 #if defined(LUAJIT_DISABLE_BUFFER)
 #define LJ_HASBUFFER		0

@@ -20,6 +20,10 @@
 #include "lj_cdata.h"
 #include "lualib.h"
 #endif
+#if LJ_INT64SUBTYPE
+#include <stdlib.h>
+#include <errno.h>
+#endif
 #include "lj_state.h"
 #include "lj_lex.h"
 #include "lj_parse.h"
@@ -120,6 +124,28 @@ static void lex_number(LexState *ls, TValue *tv)
     fmt = lj_strscan_scan((const uint8_t *)ls->sb.b, sbuflen(&ls->sb)-1, tv,
 	    (isflt ? STRSCAN_OPT_TONUM : STRSCAN_OPT_TOINT) |
 	    (LJ_HASFFI ? (STRSCAN_OPT_LL|STRSCAN_OPT_IMAG) : 0));
+#if LJ_INT64SUBTYPE
+    /* Lua 5.4 64-bit integer literal. An integer literal (no float marker)
+    ** that overflowed the 32-bit fast path comes back as STRSCAN_NUM (double).
+    ** Re-parse it as a 64-bit integer and carry it as int64/uint64 cdata, so
+    ** values up to 2^63-1 stay exact integers. A decimal literal above
+    ** INT64_MAX stays a float (Lua 5.4 rule); a hex literal wraps mod 2^64. */
+    if (!isflt && fmt == STRSCAN_NUM) {
+      const char *b = ls->sb.b;
+      int base = (b[0] == '0' && (b[1] == 'x' || b[1] == 'X')) ? 16 : 10;
+      char *endp;
+      uint64_t u;
+      errno = 0;
+      u = (uint64_t)strtoull(b, &endp, base);
+      if (errno == 0 && *endp == '\0') {
+	if (u <= (uint64_t)0x7fffffffffffffffULL) {
+	  tv->u64 = u; fmt = STRSCAN_I64;
+	} else if (base == 16) {
+	  tv->u64 = u; fmt = STRSCAN_U64;
+	}  /* else: decimal literal > INT64_MAX -> keep as float. */
+      }
+    }
+#endif
   }
 #else
   fmt = lj_strscan_scan((const uint8_t *)ls->sb.b, sbuflen(&ls->sb)-1, tv,

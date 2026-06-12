@@ -316,6 +316,16 @@ CTTYDEF(CTTYIDDEF)
   CTID_MAX = 65536
 };
 
+#if LJ_INT64SUBTYPE
+/* Lua 5.4 integer subtype carrier: a cdata holding a 64-bit int64_t/uint64_t.
+** These are the "wide" representation of the integer subtype (values that do
+** not fit LuaJIT's native 32-bit dual-number integer). */
+#define cdata_isint64(cd)	\
+  ((cd)->ctypeid == CTID_INT64 || (cd)->ctypeid == CTID_UINT64)
+#define cdata_isuint64(cd)	((cd)->ctypeid == CTID_UINT64)
+#define tvisint64(o)		(tviscdata(o) && cdata_isint64(cdataV(o)))
+#endif
+
 /* Target-dependent type IDs. */
 #if LJ_64
 #define CTID_INT_PSZ	CTID_INT64

@@ -54,6 +54,17 @@ echo ">> building LuaJIT (integer/float subtype, dual-number mode)"
 make -C "$LJ_SRC" clean >/dev/null 2>&1 || true
 make -C "$LJ_SRC" -j"$NPROC" XCFLAGS="-DLUAJIT_NUMMODE=2" >/dev/null 2>&1
 cp "$LJ_SRC/src/luajit" "$BIN/luajit-int"
+
+echo ">> building LuaJIT (experimental 64-bit integer subtype)"
+#  * luajit-int64 - dual-number build plus the experimental Lua 5.4 64-bit
+#                   integer subtype: out-of-int32 integer values are carried as
+#                   int64 cdata, so math.maxinteger, large integer literals and
+#                   64-bit wraparound match 5.4 in the interpreter. See
+#                   docs/INT64_VM_PLAN.md for design, scope and boundaries.
+make -C "$LJ_SRC" clean >/dev/null 2>&1 || true
+make -C "$LJ_SRC" -j"$NPROC" \
+  XCFLAGS="-DLUAJIT_NUMMODE=2 -DLUAJIT_ENABLE_INT64SUBTYPE" >/dev/null 2>&1
+cp "$LJ_SRC/src/luajit" "$BIN/luajit-int64"
 make -C "$LJ_SRC" clean >/dev/null 2>&1 || true
 
 echo ">> done. Binaries in $BIN:"
