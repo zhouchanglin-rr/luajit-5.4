@@ -298,7 +298,13 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
 	} else if (tvisint(o)) {
 	  lj_strfmt_putint(sb, intV(o));
 	} else {
+#if LJ_DUALNUM
+	  MSize n0 = sbuflen(sb);
 	  lj_strfmt_putfnum(sb, STRFMT_G14, numV(o));
+	  lj_strfmt_floatdot0(sb, n0);  /* Lua 5.4 float display: ensure ".0". */
+#else
+	  lj_strfmt_putfnum(sb, STRFMT_G14, numV(o));
+#endif
 	}
       }
       setstrV(L, top, lj_buf_str(L, sb));

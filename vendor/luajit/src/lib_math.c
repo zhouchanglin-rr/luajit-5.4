@@ -193,6 +193,42 @@ LJLIB_CF(math_randomseed)
 
 /* ------------------------------------------------------------------------ */
 
+/* Lua 5.3/5.4 integer subtype introspection.
+** With LJ_DUALNUM, numbers carry a runtime integer-vs-float tag; expose it.
+** With single-number mode there is no integer subtype, so every number is a
+** float (and these report that honestly). */
+LJLIB_CF(math_type)
+{
+  TValue *o = lj_lib_checkany(L, 1);
+  if (tvisint(o))
+    lua_pushliteral(L, "integer");
+  else if (tvisnum(o))
+    lua_pushliteral(L, "float");
+  else
+    lua_pushnil(L);
+  return 1;
+}
+
+LJLIB_CF(math_tointeger)
+{
+  TValue *o = lj_lib_checkany(L, 1);
+  if (tvisint(o)) {
+    lua_pushinteger(L, intV(o));
+  } else if (tvisnum(o)) {
+    double d = numV(o);
+    int32_t k = (int32_t)d;
+    if ((double)k == d)  /* Exact integral value within the integer range? */
+      lua_pushinteger(L, k);
+    else
+      lua_pushnil(L);
+  } else {
+    lua_pushnil(L);
+  }
+  return 1;
+}
+
+/* ------------------------------------------------------------------------ */
+
 #include "lj_libdef.h"
 
 LUALIB_API int luaopen_math(lua_State *L)
@@ -200,6 +236,11 @@ LUALIB_API int luaopen_math(lua_State *L)
   PRNGState *rs = (PRNGState *)lua_newuserdata(L, sizeof(PRNGState));
   lj_prng_seed_fixed(rs);
   LJ_LIB_REG(L, LUA_MATHLIBNAME, math);
+#if LJ_DUALNUM
+  /* Integer range of this build's subtype (32-bit in dual-number mode). */
+  lua_pushinteger(L, 0x7fffffff); lua_setfield(L, -2, "maxinteger");
+  lua_pushinteger(L, (int32_t)0x80000000); lua_setfield(L, -2, "mininteger");
+#endif
   return 1;
 }
 

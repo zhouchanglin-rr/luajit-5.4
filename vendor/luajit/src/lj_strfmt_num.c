@@ -625,6 +625,20 @@ GCstr * LJ_FASTCALL lj_strfmt_num(lua_State *L, cTValue *o)
 {
   char buf[STRFMT_MAXBUF_NUM];
   MSize len = (MSize)(lj_strfmt_wfnum(NULL, STRFMT_G14, o->n, buf) - buf);
+#if LJ_DUALNUM
+  /* Lua 5.4: a float always renders with a '.' or exponent (e.g. "3.0").
+  ** The %.14g result drops it, so append ".0" when no marker is present. */
+  if (len + 2 <= STRFMT_MAXBUF_NUM) {
+    MSize i; int marked = 0;
+    for (i = 0; i < len; i++) {
+      char c = buf[i];
+      if (c == '.' || c == 'e' || c == 'E' || c == 'n' || c == 'i') {
+	marked = 1; break;  /* '.', exponent, or inf/nan. */
+      }
+    }
+    if (!marked) { buf[len++] = '.'; buf[len++] = '0'; }
+  }
+#endif
   return lj_str_new(L, buf, len);
 }
 

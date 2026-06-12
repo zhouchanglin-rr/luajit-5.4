@@ -105,9 +105,27 @@ static void lex_number(LexState *ls, TValue *tv)
     lex_savenext(ls);
   }
   lex_save(ls, '\0');
+#if LJ_DUALNUM
+  /* Lua 5.4 lexical rule: a numeric literal written with a radix point or an
+  ** exponent is a float, even if its value is integral (e.g. "1.0", "1e2").
+  ** Only request int conversion for literals with no float marker. */
+  {
+    int isflt = 0;
+    const char *p = ls->sb.b;
+    MSize i, n = sbuflen(&ls->sb) - 1;
+    for (i = 0; i < n; i++) {
+      LexChar ch = (LexChar)p[i];
+      if (ch == '.' || (ch | 0x20) == xp) { isflt = 1; break; }
+    }
+    fmt = lj_strscan_scan((const uint8_t *)ls->sb.b, sbuflen(&ls->sb)-1, tv,
+	    (isflt ? STRSCAN_OPT_TONUM : STRSCAN_OPT_TOINT) |
+	    (LJ_HASFFI ? (STRSCAN_OPT_LL|STRSCAN_OPT_IMAG) : 0));
+  }
+#else
   fmt = lj_strscan_scan((const uint8_t *)ls->sb.b, sbuflen(&ls->sb)-1, tv,
-	  (LJ_DUALNUM ? STRSCAN_OPT_TOINT : STRSCAN_OPT_TONUM) |
+	  STRSCAN_OPT_TONUM |
 	  (LJ_HASFFI ? (STRSCAN_OPT_LL|STRSCAN_OPT_IMAG) : 0));
+#endif
   if (LJ_DUALNUM && fmt == STRSCAN_INT) {
     setitype(tv, LJ_TISNUM);
   } else if (fmt == STRSCAN_NUM) {

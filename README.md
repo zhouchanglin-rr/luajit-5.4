@@ -24,15 +24,18 @@ LuaJIT's parser.
 
 ```
 vendor/lua-5.4.8/   Reference Lua 5.4.8 source (lua/lua @ tag v5.4.8)
-vendor/luajit/      LuaJIT 2.1 source (LuaJIT/LuaJIT) + the <const> port
-scripts/build.sh    Builds both engines into build/bin/{lua54,luajit}
+vendor/luajit/      LuaJIT 2.1 source + the <const> and integer-subtype ports
+scripts/build.sh    Builds lua54, luajit (standard) and luajit-int (subtype)
 tests/cases/*.lua   Cross-engine correctness cases (common 5.1/5.4 subset)
 tests/run_tests.sh  Runs every case on BOTH engines, requires identical stdout
 tests/show_differences.sh  Probes Lua 5.4 features to catalog porting gaps
+tests/check_5x_syntax.sh   Audits Lua 5.3/5.4 feature support
+tests/integer_subtype.sh   Validates the integer/float subtype (luajit-int)
 benchmarks/*.lua    Classic Lua benchmarks (checksummed)
 benchmarks/run_benchmarks.py  Times both engines, verifies output, reports speedup
-port/               Standalone reference diff of the LuaJIT <const> port
+port/               Standalone reference diffs of the LuaJIT ports
 docs/PORTING.md     Feature-by-feature porting analysis and roadmap
+docs/INTEGER_SUBTYPE_PLAN.md  Design + plan for the integer/float subtype
 ```
 
 ## Quick start
@@ -105,6 +108,28 @@ repo adds full support for `local name <const> = expr`:
 Implementation touches three small, well-contained spots in the parser
 (`vendor/luajit/src/lj_parse.c`, `lj_errmsg.h`); see `docs/PORTING.md` and
 `port/` for details. It compiles cleanly and passes the cross-engine suite.
+
+## The integer/float subtype (`luajit-int`)
+
+`scripts/build.sh` also produces `build/bin/luajit-int`, a dual-number LuaJIT
+build that implements a real runtime **integer/float subtype** (Lua 5.3/5.4):
+
+- `math.type(x)` returns `"integer"`/`"float"`/`nil`;
+- integer literals/arithmetic stay integer, float literals/operations stay
+  float (`math.type(2^2)` → `float`, `math.type(1+2)` → `integer`);
+- floats print with a decimal point (`print(3.0)` → `3.0`, `"x="..4.0` → `x=4.0`);
+- `math.tointeger`, `math.maxinteger`, `math.mininteger` are available.
+
+`tests/integer_subtype.sh` verifies **12/12** within-range parity against Lua
+5.4.8. Performance is within ~2-3% of standard LuaJIT (still 5-20x over Lua
+5.4.8), so the subtype costs almost nothing.
+
+**Boundary (honest):** LuaJIT's dual-number integers are **32-bit**, while Lua
+5.4's are **64-bit**. Integers above 2^31 promote to float and then print with a
+`.0` — so integer-heavy programs in the 2^31-2^53 range differ from 5.4. That is
+why the *standard* `luajit` (all-double, exact to 2^53) remains the baseline for
+the benchmark/correctness comparison, and the full 64-bit subtype is tracked as
+Milestone 2 in [docs/INTEGER_SUBTYPE_PLAN.md](docs/INTEGER_SUBTYPE_PLAN.md).
 
 ## Remaining gaps and roadmap
 
