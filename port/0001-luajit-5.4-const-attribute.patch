@@ -1,0 +1,105 @@
+diff --git a/projects/sandbox/LuaJIT/src/lj_parse.c b/vendor/luajit/src/lj_parse.c
+index 66e5a03..715ee9f 100644
+--- a/projects/sandbox/LuaJIT/src/lj_parse.c
++++ b/vendor/luajit/src/lj_parse.c
+@@ -118,6 +118,7 @@ typedef uint16_t VarIndex;
+ #define VSTACK_VAR_RW		0x01	/* R/W variable. */
+ #define VSTACK_GOTO		0x02	/* Pending goto. */
+ #define VSTACK_LABEL		0x04	/* Label. */
++#define VSTACK_VAR_CONST	0x08	/* Const variable (Lua 5.4 <const>). */
+ 
+ /* Per-function state. */
+ typedef struct FuncState {
+@@ -623,12 +624,18 @@ static void bcemit_store(FuncState *fs, ExpDesc *var, ExpDesc *e)
+ {
+   BCIns ins;
+   if (var->k == VLOCAL) {
+-    fs->ls->vstack[var->u.s.aux].info |= VSTACK_VAR_RW;
++    VarInfo *vi = &fs->ls->vstack[var->u.s.aux];
++    if (LJ_UNLIKELY(vi->info & VSTACK_VAR_CONST))
++      lj_lex_error(fs->ls, 0, LJ_ERR_XCONST, strdata(strref(vi->name)));
++    vi->info |= VSTACK_VAR_RW;
+     expr_free(fs, e);
+     expr_toreg(fs, e, var->u.s.info);
+     return;
+   } else if (var->k == VUPVAL) {
+-    fs->ls->vstack[var->u.s.aux].info |= VSTACK_VAR_RW;
++    VarInfo *vi = &fs->ls->vstack[var->u.s.aux];
++    if (LJ_UNLIKELY(vi->info & VSTACK_VAR_CONST))
++      lj_lex_error(fs->ls, 0, LJ_ERR_XCONST, strdata(strref(vi->name)));
++    vi->info |= VSTACK_VAR_RW;
+     expr_toval(fs, e);
+     if (e->k <= VKTRUE)
+       ins = BCINS_AD(BC_USETP, var->u.s.info, const_pri(e));
+@@ -2236,6 +2243,27 @@ static void parse_call_assign(LexState *ls)
+   }
+ }
+ 
++/* Parse optional Lua 5.4 local attribute: '<' Name '>'.
++** Returns VSTACK_VAR_CONST for <const>, 0 if absent. <close> is recognised
++** but rejected, since to-be-closed semantics are not implemented in this port.
++*/
++static int parse_attrib(LexState *ls)
++{
++  if (lex_opt(ls, '<')) {
++    GCstr *attr = lex_str(ls);
++    const char *s = strdata(attr);
++    lex_check(ls, '>');
++    if (attr->len == 5 && memcmp(s, "const", 5) == 0) {
++      return VSTACK_VAR_CONST;
++    } else if (attr->len == 5 && memcmp(s, "close", 5) == 0) {
++      lj_lex_error(ls, 0, LJ_ERR_XCLOSE);
++    } else {
++      lj_lex_error(ls, 0, LJ_ERR_XATTR, s);
++    }
++  }
++  return 0;
++}
++
+ /* Parse 'local' statement. */
+ static void parse_local(LexState *ls)
+ {
+@@ -2256,8 +2284,12 @@ static void parse_local(LexState *ls)
+   } else {  /* Local variable declaration. */
+     ExpDesc e;
+     BCReg nexps, nvars = 0;
+-    do {  /* Collect LHS. */
+-      var_new(ls, nvars++, lex_str(ls));
++    MSize vbase = ls->vtop;  /* vstack index of the first new variable. */
++    uint8_t attribs[LJ_MAX_LOCVAR];  /* Per-variable Lua 5.4 attribute flags. */
++    do {  /* Collect LHS, each name optionally followed by a <attrib>. */
++      var_new(ls, nvars, lex_str(ls));
++      attribs[nvars] = (uint8_t)parse_attrib(ls);
++      nvars++;
+     } while (lex_opt(ls, ','));
+     if (lex_opt(ls, '=')) {  /* Optional RHS. */
+       nexps = expr_list(ls, &e);
+@@ -2266,7 +2298,12 @@ static void parse_local(LexState *ls)
+       nexps = 0;
+     }
+     assign_adjust(ls, nvars, nexps, &e);
+-    var_add(ls, nvars);
++    var_add(ls, nvars);  /* NB: resets each VarInfo->info to 0. */
++    {  /* Apply Lua 5.4 attributes (must be after var_add). */
++      BCReg i;
++      for (i = 0; i < nvars; i++)
++	if (attribs[i]) ls->vstack[vbase + i].info |= attribs[i];
++    }
+   }
+ }
+ 
+diff --git a/projects/sandbox/LuaJIT/src/lj_errmsg.h b/vendor/luajit/src/lj_errmsg.h
+index daf7fb6..625ee7f 100644
+--- a/projects/sandbox/LuaJIT/src/lj_errmsg.h
++++ b/vendor/luajit/src/lj_errmsg.h
+@@ -143,6 +143,10 @@ ERRDEF(XBREAK,	"no loop to break")
+ ERRDEF(XLUNDEF,	"undefined label " LUA_QS)
+ ERRDEF(XLDUP,	"duplicate label " LUA_QS)
+ ERRDEF(XGSCOPE,	"<goto %s> jumps into the scope of local " LUA_QS)
++/* Lua 5.4 local attribute support (LuaJIT-5.4 port). */
++ERRDEF(XATTR,	"unknown attribute " LUA_QS)
++ERRDEF(XCONST,	"attempt to assign to const variable " LUA_QS)
++ERRDEF(XCLOSE,	"to-be-closed variables (" LUA_QL("<close>") ") are not supported by this LuaJIT-5.4 port")
+ 
+ /* Bytecode reader errors. */
+ ERRDEF(BCFMT,	"cannot load incompatible bytecode")

@@ -1,0 +1,118 @@
+{
+  "reps": 5,
+  "quick": false,
+  "geomean_speedup": 6.28,
+  "all_match": true,
+  "results": [
+    {
+      "name": "fib",
+      "args": [
+        "34"
+      ],
+      "lua54_s": 0.3151,
+      "luajit_s": 0.0578,
+      "speedup": 5.45,
+      "match": true,
+      "output_ref": "fib(34)=5702887",
+      "output_jit": "fib(34)=5702887"
+    },
+    {
+      "name": "ackermann",
+      "args": [
+        "3",
+        "9"
+      ],
+      "lua54_s": 0.1838,
+      "luajit_s": 0.0305,
+      "speedup": 6.03,
+      "match": true,
+      "output_ref": "ack(3,9)=4093",
+      "output_jit": "ack(3,9)=4093"
+    },
+    {
+      "name": "mandelbrot",
+      "args": [
+        "800"
+      ],
+      "lua54_s": 0.6441,
+      "luajit_s": 0.0801,
+      "speedup": 8.04,
+      "match": true,
+      "output_ref": "mandelbrot N=800 checksum=28121403",
+      "output_jit": "mandelbrot N=800 checksum=28121403"
+    },
+    {
+      "name": "nbody",
+      "args": [
+        "500000"
+      ],
+      "lua54_s": 0.8439,
+      "luajit_s": 0.1116,
+      "speedup": 7.56,
+      "match": true,
+      "output_ref": "nbody steps=500000 start=-0.169075164 end=-0.169096567",
+      "output_jit": "nbody steps=500000 start=-0.169075164 end=-0.169096567"
+    },
+    {
+      "name": "spectralnorm",
+      "args": [
+        "550"
+      ],
+      "lua54_s": 0.4198,
+      "luajit_s": 0.018,
+      "speedup": 23.38,
+      "match": true,
+      "output_ref": "spectralnorm N=550 = 1.274224125",
+      "output_jit": "spectralnorm N=550 = 1.274224125"
+    },
+    {
+      "name": "fannkuch",
+      "args": [
+        "10"
+      ],
+      "lua54_s": 1.4221,
+      "luajit_s": 0.3019,
+      "speedup": 4.71,
+      "match": true,
+      "output_ref": "fannkuch(10) sum=73196 max=38",
+      "output_jit": "fannkuch(10) sum=73196 max=38"
+    },
+    {
+      "name": "matmul",
+      "args": [
+        "160"
+      ],
+      "lua54_s": 0.0604,
+      "luajit_s": 0.0077,
+      "speedup": 7.89,
+      "match": true,
+      "output_ref": "matmul N=160 trace=62542337 c11=432221",
+      "output_jit": "matmul N=160 trace=62542337 c11=432221"
+    },
+    {
+      "name": "sieve",
+      "args": [
+        "3000000",
+        "4"
+      ],
+      "lua54_s": 0.6637,
+      "luajit_s": 0.1809,
+      "speedup": 3.67,
+      "match": true,
+      "output_ref": "sieve primes<=3000000 count=216816",
+      "output_jit": "sieve primes<=3000000 count=216816"
+    },
+    {
+      "name": "string_ops",
+      "args": [
+        "3000"
+      ],
+      "lua54_s": 0.0637,
+      "luajit_s": 0.0266,
+      "speedup": 2.39,
+      "match": true,
+      "output_ref": "string_ops reps=3000 len=738000 tokens=150000 checksum=423896475",
+      "output_jit": "string_ops reps=3000 len=738000 tokens=150000 checksum=423896475"
+    }
+  ]
+}

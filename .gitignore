@@ -1,0 +1,23 @@
+# Build output
+/build/
+
+# Compiled object/library/binaries from in-tree vendored builds
+*.o
+*.a
+*.so
+*.obj
+vendor/lua-5.4.8/lua
+vendor/lua-5.4.8/luac
+vendor/luajit/src/luajit
+vendor/luajit/src/host/buildvm
+vendor/luajit/src/host/minilua
+vendor/luajit/src/lj_bcdef.h
+vendor/luajit/src/lj_ffdef.h
+vendor/luajit/src/lj_libdef.h
+vendor/luajit/src/lj_recdef.h
+vendor/luajit/src/lj_folddef.h
+vendor/luajit/src/lj_vm.S
+vendor/luajit/src/luajit.h
+
+# Python cache
+__pycache__/
