@@ -1,0 +1,69 @@
+--- New file: src/lib_strpack.c (see vendor/luajit/src/lib_strpack.c) ---
+diff --git a/projects/sandbox/LuaJIT/src/lualib.h b/vendor/luajit/src/lualib.h
+index f0d1642..f3f8f50 100644
+--- a/projects/sandbox/LuaJIT/src/lualib.h
++++ b/vendor/luajit/src/lualib.h
+@@ -19,6 +19,7 @@
+ #define LUA_LOADLIBNAME	"package"
+ #define LUA_DBLIBNAME	"debug"
+ #define LUA_BITLIBNAME	"bit"
++#define LUA_UTF8LIBNAME	"utf8"
+ #define LUA_JITLIBNAME	"jit"
+ #define LUA_FFILIBNAME	"ffi"
+ 
+@@ -31,6 +32,8 @@ LUALIB_API int luaopen_os(lua_State *L);
+ LUALIB_API int luaopen_package(lua_State *L);
+ LUALIB_API int luaopen_debug(lua_State *L);
+ LUALIB_API int luaopen_bit(lua_State *L);
++LUALIB_API int luaopen_utf8(lua_State *L);
++LUALIB_API int luaopen_string_pack(lua_State *L);
+ LUALIB_API int luaopen_jit(lua_State *L);
+ LUALIB_API int luaopen_ffi(lua_State *L);
+ LUALIB_API int luaopen_string_buffer(lua_State *L);
+diff --git a/projects/sandbox/LuaJIT/src/lib_init.c b/vendor/luajit/src/lib_init.c
+index fb8138f..63b46e2 100644
+--- a/projects/sandbox/LuaJIT/src/lib_init.c
++++ b/vendor/luajit/src/lib_init.c
+@@ -25,6 +25,7 @@ static const luaL_Reg lj_lib_load[] = {
+   { LUA_MATHLIBNAME,	luaopen_math },
+   { LUA_DBLIBNAME,	luaopen_debug },
+   { LUA_BITLIBNAME,	luaopen_bit },
++  { LUA_UTF8LIBNAME,	luaopen_utf8 },
+   { LUA_JITLIBNAME,	luaopen_jit },
+   { NULL,		NULL }
+ };
+@@ -51,5 +52,8 @@ LUALIB_API void luaL_openlibs(lua_State *L)
+     lua_setfield(L, -2, lib->name);
+   }
+   lua_pop(L, 1);
++  /* Lua 5.3/5.4 string.pack/unpack/packsize (LuaJIT-5.4 port): add to the
++  ** 'string' table, which has just been loaded above. */
++  luaopen_string_pack(L);
+ }
+ 
+diff --git a/projects/sandbox/LuaJIT/src/Makefile b/vendor/luajit/src/Makefile
+index bac0341..5785dd6 100644
+--- a/projects/sandbox/LuaJIT/src/Makefile
++++ b/vendor/luajit/src/Makefile
+@@ -526,7 +526,7 @@ LJCORE_O= lj_assert.o lj_gc.o lj_err.o lj_char.o lj_bc.o lj_obj.o lj_buf.o \
+ 	  lj_asm.o lj_trace.o lj_gdbjit.o \
+ 	  lj_ctype.o lj_cdata.o lj_cconv.o lj_ccall.o lj_ccallback.o \
+ 	  lj_carith.o lj_clib.o lj_cparse.o \
+-	  lj_lib.o lj_alloc.o lib_aux.o \
++	  lj_lib.o lj_alloc.o lib_aux.o lib_utf8.o lib_strpack.o \
+ 	  $(LJLIB_O) lib_init.o
+ 
+ LJVMCORE_O= $(LJVM_O) $(LJCORE_O)
+diff --git a/projects/sandbox/LuaJIT/src/ljamalg.c b/vendor/luajit/src/ljamalg.c
+index 1dd9698..5a39150 100644
+--- a/projects/sandbox/LuaJIT/src/ljamalg.c
++++ b/vendor/luajit/src/ljamalg.c
+@@ -75,6 +75,8 @@
+ #include "lj_alloc.c"
+ 
+ #include "lib_aux.c"
++#include "lib_utf8.c"
++#include "lib_strpack.c"
+ #include "lib_base.c"
+ #include "lib_math.c"
+ #include "lib_string.c"

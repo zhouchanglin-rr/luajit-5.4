@@ -14,6 +14,16 @@ doubles** (with an internal integer fast path), whereas **Lua 5.3+ introduced a
 first-class 64-bit integer subtype**. That single design difference is the root
 of most of the porting difficulty.
 
+## Update: string.pack / unpack / packsize (Tier-1, implemented)
+
+`string.pack`, `string.unpack` and `string.packsize` (Lua 5.3/5.4) are now
+provided, ported from the reference into a self-contained C module
+(`lib_strpack.c`) and registered into the `string` table — no VM/JIT/parser
+changes. Format options, endianness (`<`/`>`/`=`), alignment (`!`), fixed and
+length-prefixed and zero-terminated strings all match Lua 5.4.8
+(`tests/cases/12_strpack.lua`). Caveat: LuaJIT numbers are doubles, so integers
+beyond 2^53 (e.g. full 8-byte values) lose precision; within range it matches.
+
 ## Update: utf8 library (Tier-1, implemented)
 
 The Lua 5.3/5.4 `utf8` library is now provided by LuaJIT (both the standard and
@@ -115,7 +125,9 @@ produces identical output, including observing the compile error via `load()`.
 
 **Tier 1 — compile-time only (days each, low risk).**
 - `utf8` library: **DONE** (`lib_utf8.c`, a self-contained C module; no VM changes).
-- `string.pack`/`unpack`: pure C library additions; no VM changes.
+- `string.pack`/`unpack`/`packsize`: **DONE** (`lib_strpack.c`, ported from the
+  reference; registered into the `string` table; no VM changes). Integers wider
+  than 2^53 lose precision (LuaJIT numbers are doubles) — within range it matches.
 - `//` and native bitwise `& | ~ << >>`: **reclassified.** These are *not*
   compile-time-only in LuaJIT — there are no idiv/bitwise metamethods or
   bytecodes (arithmetic stops at `pow`; bitwise is only the `bit` library). A
