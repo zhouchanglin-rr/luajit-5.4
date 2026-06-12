@@ -123,6 +123,11 @@ typedef uint16_t VarIndex;
 /* Per-function state. */
 typedef struct FuncState {
   GCtab *kt;			/* Hash table for constants. */
+#if LJ_DUALNUM
+  GCtab *ktf;			/* Separate table for float constants, so an */
+				/* integral float (4.0) is not merged with the */
+				/* integer 4 (Lua 5.4 distinguishes them). */
+#endif
   LexState *ls;			/* Lexer state. */
   lua_State *L;			/* Lua state. */
   FuncScope *bl;		/* Current scope. */
@@ -208,7 +213,14 @@ static BCReg const_num(FuncState *fs, ExpDesc *e)
   lua_State *L = fs->L;
   TValue *o;
   lj_assertFS(expr_isnumk(e), "bad usage");
-  o = lj_tab_set(L, fs->kt, &e->u.nval);
+#if LJ_DUALNUM
+  /* Keep float constants in a separate table so an integral float such as 4.0
+  ** gets its own slot instead of being merged with the integer constant 4. */
+  if (tvisnum(&e->u.nval))
+    o = lj_tab_set(L, fs->ktf, &e->u.nval);
+  else
+#endif
+    o = lj_tab_set(L, fs->kt, &e->u.nval);
   if (tvhaskslot(o))
     return tvkslot(o);
   o->u64 = fs->nkn;
@@ -789,11 +801,17 @@ static int foldarith(BinOpr opr, ExpDesc *e1, ExpDesc *e2)
   setnumV(&o, n);
   if (tvisnan(&o) || tvismzero(&o)) return 0;  /* Avoid NaN and -0 as consts. */
   if (LJ_DUALNUM) {
-    int64_t i64;
-    int32_t k;
-    if (lj_num2int_check(n, i64, k)) {
-      setintV(&e1->u.nval, k);
-      return 1;
+    /* Lua 5.4: the result is an integer only if both operands are integers and
+    ** the operator is not '/' or '^' (those always produce a float). */
+    int isflt = tvisnum(expr_numtv(e1)) || tvisnum(expr_numtv(e2)) ||
+		opr == OPR_DIV || opr == OPR_POW;
+    if (!isflt) {
+      int64_t i64;
+      int32_t k;
+      if (lj_num2int_check(n, i64, k)) {
+	setintV(&e1->u.nval, k);
+	return 1;
+      }
     }
   }
   setnumV(&e1->u.nval, n);
@@ -1413,6 +1431,29 @@ static void fs_fixup_k(FuncState *fs, GCproto *pt, void *kptr)
       }
     }
   }
+#if LJ_DUALNUM
+  /* Emit float constants from the separate float table as actual floats,
+  ** even when their value is integral (Lua 5.4 keeps 4.0 distinct from 4). */
+  {
+    GCtab *ktf = fs->ktf;
+    TValue *farray = tvref(ktf->array);
+    Node *fnode = noderef(ktf->node);
+    MSize fhmask = ktf->hmask;
+    for (i = 0; i < ktf->asize; i++)
+      if (tvhaskslot(&farray[i])) {
+	TValue *tv = &((TValue *)kptr)[tvkslot(&farray[i])];
+	setnumV(tv, (lua_Number)i);  /* Array slot i represents float (double)i. */
+      }
+    for (i = 0; i <= fhmask; i++) {
+      Node *n = &fnode[i];
+      if (tvhaskslot(&n->val)) {
+	TValue *tv = &((TValue *)kptr)[tvkslot(&n->val)];
+	/* Key may have been normalised to an integer; emit it as a float. */
+	setnumV(tv, tvisint(&n->key) ? (lua_Number)intV(&n->key) : numV(&n->key));
+      }
+    }
+  }
+#endif
 }
 
 /* Fixup upvalues for prototype, step #1. */
@@ -1606,6 +1647,9 @@ static GCproto *fs_finish(LexState *ls, BCLine line)
   );
 
   L->top--;  /* Pop table of constants. */
+#if LJ_DUALNUM
+  L->top--;  /* Pop float-constant table. */
+#endif
   ls->vtop = fs->vbase;  /* Reset variable stack. */
   ls->fs = fs->prev;
   lj_assertL(ls->fs != NULL || ls->tok == TK_eof, "bad parser state");
@@ -1635,6 +1679,11 @@ static void fs_init(LexState *ls, FuncState *fs)
   /* Anchor table of constants in stack to avoid being collected. */
   settabV(L, L->top, fs->kt);
   incr_top(L);
+#if LJ_DUALNUM
+  fs->ktf = lj_tab_new(L, 0, 0);
+  settabV(L, L->top, fs->ktf);  /* Anchor float-constant table too. */
+  incr_top(L);
+#endif
 }
 
 /* -- Expressions --------------------------------------------------------- */

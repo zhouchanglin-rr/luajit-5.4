@@ -160,6 +160,21 @@ char * LJ_FASTCALL lj_strfmt_wuleb128(char *p, uint32_t v)
   return p;
 }
 
+#if LJ_DUALNUM
+/* Lua 5.4: a float always renders with a '.' or exponent. Append ".0" to the
+** number written into sb starting at offset n0 if it has no such marker. */
+SBuf *lj_strfmt_floatdot0(SBuf *sb, MSize n0)
+{
+  const char *p = sb->b + n0, *e = sb->w;
+  for (; p < e; p++) {
+    char c = *p;
+    if (c == '.' || c == 'e' || c == 'E' || c == 'n' || c == 'i') return sb;
+  }
+  { char *w = lj_buf_more(sb, 2); *w++ = '.'; *w++ = '0'; sb->w = w; }
+  return sb;
+}
+#endif
+
 /* Return string or write number to tmp buffer and return pointer to start. */
 const char *lj_strfmt_wstrnum(lua_State *L, cTValue *o, MSize *lenp)
 {
@@ -175,6 +190,9 @@ const char *lj_strfmt_wstrnum(lua_State *L, cTValue *o, MSize *lenp)
     sb = lj_strfmt_putint(lj_buf_tmp_(L), intV(o));
   } else if (tvisnum(o)) {
     sb = lj_strfmt_putfnum(lj_buf_tmp_(L), STRFMT_G14, o->n);
+#if LJ_DUALNUM
+    sb = lj_strfmt_floatdot0(sb, 0);  /* Lua 5.4 float display: ensure ".0". */
+#endif
   } else {
     return NULL;
   }
@@ -195,7 +213,13 @@ SBuf * LJ_FASTCALL lj_strfmt_putint(SBuf *sb, int32_t k)
 /* Add number to buffer. */
 SBuf * LJ_FASTCALL lj_strfmt_putnum(SBuf *sb, cTValue *o)
 {
+#if LJ_DUALNUM
+  MSize n0 = sbuflen(sb);  /* Number may be appended after existing content. */
+  sb = lj_strfmt_putfnum(sb, STRFMT_G14, o->n);
+  return lj_strfmt_floatdot0(sb, n0);
+#else
   return lj_strfmt_putfnum(sb, STRFMT_G14, o->n);
+#endif
 }
 #endif
 

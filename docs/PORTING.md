@@ -14,6 +14,23 @@ doubles** (with an internal integer fast path), whereas **Lua 5.3+ introduced a
 first-class 64-bit integer subtype**. That single design difference is the root
 of most of the porting difficulty.
 
+## Update: integer/float subtype (Milestone 1 implemented)
+
+A dual-number LuaJIT variant (`build/bin/luajit-int`, built with
+`-DLUAJIT_NUMMODE=2`) now implements a real runtime integer/float subtype. See
+[INTEGER_SUBTYPE_PLAN.md](INTEGER_SUBTYPE_PLAN.md). Status changes vs the table
+below (verified by `tests/integer_subtype.sh`, 12/12 within-range parity):
+
+- `math.type(x)` — **implemented** (returns integer/float/nil).
+- `math.tointeger(x)` — **implemented**.
+- `math.maxinteger`/`mininteger` — **implemented** (32-bit values in this build).
+- float prints with `.0` (`print(3.0)` → `3.0`) — **implemented**.
+- integer-vs-float typing for literals, arithmetic, concat — **implemented**.
+
+Remaining within this area: **64-bit** integers (this variant is 32-bit, so
+integers above 2^31 promote to float — Milestone 2), numeric `for` loop float
+typing, and the `//` operator.
+
 ## Empirical gap analysis
 
 Output of `tests/show_differences.sh` (run on both engines). `DIFF` = a Lua 5.4

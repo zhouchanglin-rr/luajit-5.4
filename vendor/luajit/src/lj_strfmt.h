@@ -112,6 +112,9 @@ LJ_FUNC int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry);
 
 /* Conversions to strings. */
 LJ_FUNC GCstr * LJ_FASTCALL lj_strfmt_int(lua_State *L, int32_t k);
+#if LJ_DUALNUM
+LJ_FUNC SBuf *lj_strfmt_floatdot0(SBuf *sb, MSize n0);  /* Lua 5.4 float ".0". */
+#endif
 LJ_FUNCA GCstr * LJ_FASTCALL lj_strfmt_num(lua_State *L, cTValue *o);
 LJ_FUNCA GCstr * LJ_FASTCALL lj_strfmt_number(lua_State *L, cTValue *o);
 #if LJ_HASJIT
